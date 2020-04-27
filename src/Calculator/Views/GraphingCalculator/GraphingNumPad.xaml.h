@@ -7,6 +7,7 @@
 #include "CalcViewModel/GraphingCalculator/GraphingCalculatorViewModel.h"
 #include "Views/GraphingCalculator/EquationInputArea.xaml.h"
 #include "CalcViewModel/Common/CalculatorButtonUser.h"
+#include "CalcViewModel/Common/TraceLogger.h"
 
 namespace CalculatorApp
 {
@@ -32,5 +33,8 @@ namespace CalculatorApp
         void GraphingNumPad_PointerPressed(Platform::Object ^ sender, Windows::UI::Xaml::Input::PointerRoutedEventArgs ^ e);
         Controls::MathRichEditBox^ GetActiveRichEdit();
         void Flyout_Opening(Platform::Object ^ sender, Platform::Object ^ e);
+
+    private:
+        static const std::tuple<Platform::String ^, int, int> GetButtonOutput(NumbersAndOperatorsEnum id);
     };
 }

@@ -45,6 +45,10 @@ namespace GraphControl::DX
 
         void CreateWindowSizeDependentResources();
 
+        bool RenderMain::CanRenderPoint();
+
+        void SetPointRadius(float radius);
+
         bool RunRenderPass();
 
         Windows::Foundation::IAsyncAction ^ RunRenderPassAsync(bool allowCancel = true);
@@ -58,6 +62,8 @@ namespace GraphControl::DX
         {
             return m_isRenderPassSuccesful;
         }
+
+        HRESULT GetRenderError();
 
         // Indicates if we are in active tracing mode (the tracing box is being used and controlled through keyboard input)
         property bool ActiveTracing
@@ -78,7 +84,12 @@ namespace GraphControl::DX
                 if (m_activeTracingPointerLocation != newValue)
                 {
                     m_activeTracingPointerLocation = newValue;
-                    RunRenderPass();
+
+                    bool wasPointRendered = m_Tracing;
+                    if (CanRenderPoint() || wasPointRendered)
+                    {
+                        RunRenderPassAsync();
+                    }
                 }
             }
         }
@@ -182,5 +193,7 @@ namespace GraphControl::DX
          Windows::Foundation::IAsyncAction ^ m_renderPass = nullptr;
 
          bool m_isRenderPassSuccesful;
+
+         HRESULT m_HResult;
     };
 }

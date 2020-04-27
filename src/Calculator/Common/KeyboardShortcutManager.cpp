@@ -52,6 +52,7 @@ static map<int, bool> s_IsDropDownOpen;
 static map<int, bool> s_ignoreNextEscape;
 static map<int, bool> s_keepIgnoringEscape;
 static map<int, bool> s_fHonorShortcuts;
+static map<int, bool> s_fDisableShortcuts;
 static map<int, Flyout ^> s_AboutFlyout;
 
 static reader_writer_lock s_keyboardShortcutMapLock;
@@ -642,6 +643,13 @@ void KeyboardShortcutManager::OnAcceleratorKeyActivated(CoreDispatcher ^, Accele
             return;
         }
 
+        // Ctrl is pressed in addition to alt, this means Alt Gr is intended.  do not navigate.
+        if ((static_cast<short>(Window::Current->CoreWindow->GetKeyState(VirtualKey::Control)) & static_cast<short>(CoreVirtualKeyStates::Down))
+            == static_cast<short>(CoreVirtualKeyStates::Down))
+        {
+            return;
+        }
+
         const auto& lookupMap = GetCurrentKeyDictionary(static_cast<MyVirtualKey>(key), altPressed);
         auto listItems = lookupMap.equal_range(static_cast<MyVirtualKey>(key));
         for (auto listIterator = listItems.first; listIterator != listItems.second; ++listIterator)
@@ -735,6 +743,15 @@ void KeyboardShortcutManager::HonorShortcuts(bool allow)
 
     if (s_fHonorShortcuts.find(viewId) != s_fHonorShortcuts.end())
     {
+        if (s_fDisableShortcuts.find(viewId) != s_fDisableShortcuts.end())
+        {
+            if (s_fDisableShortcuts[viewId])
+            {
+                s_fHonorShortcuts[viewId] = false;
+                return;
+            }
+        }
+
         s_fHonorShortcuts[viewId] = allow;
     }
 }
@@ -794,6 +811,7 @@ void KeyboardShortcutManager::RegisterNewAppViewId()
     s_ignoreNextEscape[appViewId] = false;
     s_keepIgnoringEscape[appViewId] = false;
     s_fHonorShortcuts[appViewId] = true;
+    s_fDisableShortcuts[appViewId] = false;
     s_AboutFlyout[appViewId] = nullptr;
 }
 
@@ -819,5 +837,18 @@ void KeyboardShortcutManager::OnWindowClosed(int viewId)
     s_ignoreNextEscape.erase(viewId);
     s_keepIgnoringEscape.erase(viewId);
     s_fHonorShortcuts.erase(viewId);
+    s_fDisableShortcuts.erase(viewId);
     s_AboutFlyout.erase(viewId);
+}
+
+void KeyboardShortcutManager::DisableShortcuts(bool disable)
+{
+    int viewId = Utils::GetWindowId();
+
+    if (s_fDisableShortcuts.find(viewId) != s_fDisableShortcuts.end())
+    {
+        s_fDisableShortcuts[viewId] = disable;
+    }
+
+    HonorShortcuts(!disable);
 }

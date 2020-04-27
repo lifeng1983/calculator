@@ -50,7 +50,7 @@ namespace CalculatorApp
             [this](CoreApplicationViewTitleBar ^ cTitleBar, Object ^) { this->SetTitleBarVisibility(); });
         m_layoutChangedToken = m_coreTitleBar->LayoutMetricsChanged +=
             ref new TypedEventHandler<CoreApplicationViewTitleBar ^, Object ^>([this](CoreApplicationViewTitleBar ^ cTitleBar, Object ^) {
-                this->LayoutRoot->Height = cTitleBar->Height;
+                this->SetTitleBarHeight();
                 this->SetTitleBarPadding();
             });
 
@@ -60,11 +60,10 @@ namespace CalculatorApp
         m_windowActivatedToken = Window::Current->Activated +=
             ref new Windows::UI::Xaml::WindowActivatedEventHandler(this, &CalculatorApp::TitleBar::OnWindowActivated);
         // Set properties
-        LayoutRoot->Height = m_coreTitleBar->Height;
-        SetTitleBarControlColors();
-
-        SetTitleBarVisibility();
-        SetTitleBarPadding();
+        this->SetTitleBarHeight();
+        this->SetTitleBarControlColors();
+        this->SetTitleBarVisibility();
+        this->SetTitleBarPadding();
     }
 
     void TitleBar::OnUnloaded(_In_ Object ^ /*sender*/, _In_ RoutedEventArgs ^ /*e*/)
@@ -85,6 +84,11 @@ namespace CalculatorApp
     void TitleBar::SetTitleBarVisibility()
     {
         this->LayoutRoot->Visibility = m_coreTitleBar->IsVisible || IsAlwaysOnTopMode ? ::Visibility::Visible : ::Visibility::Collapsed;
+    }
+
+    void TitleBar::SetTitleBarHeight()
+    {
+        this->LayoutRoot->Height = m_coreTitleBar->Height;
     }
 
     void TitleBar::SetTitleBarPadding()

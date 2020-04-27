@@ -34,6 +34,7 @@ namespace Graphing
         virtual ~IParsingOptions() = default;
 
         virtual void SetFormatType(FormatType type) = 0;
+        virtual void SetLocalizationType(LocalizationType value) = 0;
     };
 
     struct IEvalOptions : public NonCopyable, public NonMoveable
@@ -49,7 +50,8 @@ namespace Graphing
         virtual ~IFormatOptions() = default;
 
         virtual void SetFormatType(FormatType type) = 0;
-		virtual void SetMathMLPrefix(const std::wstring& value) = 0;
+        virtual void SetMathMLPrefix(const std::wstring& value) = 0;
+        virtual void SetLocalizationType(LocalizationType value) = 0;
     };
 
     struct IMathSolver : public NonCopyable, public NonMoveable
@@ -62,9 +64,11 @@ namespace Graphing
         virtual IEvalOptions& EvalOptions() = 0;
         virtual IFormatOptions& FormatOptions() = 0;
 
-        virtual std::unique_ptr<IExpression> ParseInput(const std::wstring& input) = 0;
-        virtual std::shared_ptr<IGraph> CreateGrapher(const IExpression* expression) = 0;
+        virtual std::unique_ptr<IExpression> ParseInput(const std::wstring& input, int& errorCodeOut, int& errorTypeOut) = 0;
 
+        virtual void HRErrorToErrorInfo(HRESULT hr, int& errorCodeOut, int& errorTypeOut) = 0;
+
+        virtual std::shared_ptr<IGraph> CreateGrapher(const IExpression* expression) = 0;
         virtual std::shared_ptr<Graphing::IGraph> CreateGrapher() = 0;
 
         virtual std::wstring Serialize(const IExpression* expression) = 0;

@@ -12,11 +12,6 @@
 #include "Common/BitLength.h"
 #include "Common/NumberBase.h"
 
-namespace CalculatorFunctionalTests
-{
-    class HistoryTests;
-}
-
 namespace CalculatorUnitTests
 {
     class MultiWindowUnitTests;
@@ -247,7 +242,11 @@ namespace CalculatorApp
                 }
             }
 
-        internal :
+            // Used by unit tests
+            void ResetCalcManager(bool clearMemory);
+            void SendCommandToCalcManager(int command);
+
+        internal:
             void OnPaste(Platform::String ^ pastedString);
             void OnCopyCommand(Platform::Object ^ parameter);
             void OnPasteCommand(Platform::Object ^ parameter);
@@ -307,7 +306,7 @@ namespace CalculatorApp
                 _Inout_ std::shared_ptr<std::vector<std::shared_ptr<IExpressionCommand>>> const& commands);
             void SetTokens(_Inout_ std::shared_ptr<std::vector<std::pair<std::wstring, int>>> const& tokens);
             NumbersAndOperatorsEnum ConvertIntegerToNumbersAndOperatorsEnum(unsigned int parameter);
-            static RADIX_TYPE GetRadixTypeFromNumberBase(CalculatorApp::Common::NumberBase base);
+            static RadixType GetRadixTypeFromNumberBase(CalculatorApp::Common::NumberBase base);
             NumbersAndOperatorsEnum m_CurrentAngleType;
             wchar_t m_decimalSeparator;
             CalculatorDisplay m_calculatorDisplay;
@@ -373,7 +372,6 @@ namespace CalculatorApp
             CalculatorApp::Common::ViewMode GetCalculatorMode();
 
             friend class CalculatorDisplay;
-            friend class CalculatorFunctionalTests::HistoryTests;
             friend class CalculatorUnitTests::MultiWindowUnitTests;
         };
     }

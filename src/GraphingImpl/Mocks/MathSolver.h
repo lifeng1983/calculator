@@ -13,6 +13,10 @@ namespace MockGraphingImpl
         void SetFormatType(Graphing::FormatType type) override
         {
         }
+
+        void SetLocalizationType(Graphing::LocalizationType value) override
+        {
+        }
     };
 
     class EvalOptions : public Graphing::IEvalOptions
@@ -44,6 +48,10 @@ namespace MockGraphingImpl
         }
 
         void SetMathMLPrefix(const std::wstring& value) override
+        {
+        }
+
+        void SetLocalizationType(Graphing::LocalizationType value) override
         {
         }
     };
@@ -107,7 +115,7 @@ namespace MockGraphingImpl
             return m_formatOptions;
         }
 
-        std::unique_ptr<Graphing::IExpression> ParseInput(const std::wstring& input) override
+        std::unique_ptr<Graphing::IExpression> ParseInput(const std::wstring& input, int& errorCodeOut, int& errorTypeOut) override
         {
             if (input.empty())
             {
@@ -115,6 +123,10 @@ namespace MockGraphingImpl
             }
 
             return std::make_unique<MockExpression>(MockExpression{});
+        }
+
+        void HRErrorToErrorInfo(HRESULT hr, int& errorCodeOut, int& errorTypeOut)
+        {
         }
 
         std::shared_ptr<Graphing::IGraph> CreateGrapher(const Graphing::IExpression* expression) override;

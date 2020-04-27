@@ -16,6 +16,7 @@ using namespace Concurrency;
 using namespace Windows::Devices::Input;
 using namespace Windows::Foundation;
 using namespace Windows::Foundation::Collections;
+using namespace Windows::Storage;
 using namespace Windows::Storage::Streams;
 using namespace Windows::System;
 using namespace Windows::System::Threading;
@@ -29,10 +30,14 @@ using namespace Windows::UI::Xaml::Media;
 using namespace GraphControl;
 
 DEPENDENCY_PROPERTY_INITIALIZATION(Grapher, ForceProportionalAxes);
+DEPENDENCY_PROPERTY_INITIALIZATION(Grapher, UseCommaDecimalSeperator);
 DEPENDENCY_PROPERTY_INITIALIZATION(Grapher, Variables);
 DEPENDENCY_PROPERTY_INITIALIZATION(Grapher, Equations);
 DEPENDENCY_PROPERTY_INITIALIZATION(Grapher, AxesColor);
 DEPENDENCY_PROPERTY_INITIALIZATION(Grapher, GraphBackground);
+DEPENDENCY_PROPERTY_INITIALIZATION(Grapher, GridLinesColor);
+DEPENDENCY_PROPERTY_INITIALIZATION(Grapher, LineWidth);
+DEPENDENCY_PROPERTY_INITIALIZATION(Grapher, IsKeepCurrentView);
 
 namespace
 {
@@ -83,6 +88,7 @@ namespace GraphControl
     void Grapher::ZoomFromCenter(double scale)
     {
         ScaleRange(0, 0, scale);
+        GraphViewChangedEvent(this, GraphViewChangedReason::Manipulation);
     }
 
     void Grapher::ScaleRange(double centerX, double centerY, double scale)
@@ -91,9 +97,18 @@ namespace GraphControl
         {
             if (auto renderer = m_graph->GetRenderer())
             {
+                m_renderMain->GetCriticalSection().lock();
+
                 if (SUCCEEDED(renderer->ScaleRange(centerX, centerY, scale)))
                 {
+                    m_renderMain->GetCriticalSection().unlock();
+
                     m_renderMain->RunRenderPass();
+                    GraphViewChangedEvent(this, GraphViewChangedReason::Manipulation);
+                }
+                else
+                {
+                    m_renderMain->GetCriticalSection().unlock();
                 }
             }
         }
@@ -108,6 +123,7 @@ namespace GraphControl
                 if (SUCCEEDED(renderer->ResetRange()))
                 {
                     m_renderMain->RunRenderPass();
+                    GraphViewChangedEvent(this, GraphViewChangedReason::Reset);
                 }
             }
         }
@@ -175,6 +191,7 @@ namespace GraphControl
     {
         if (m_graph)
         {
+            m_graph->TryResetSelection();
             UpdateGraphOptions(m_graph->GetOptions(), GetGraphableEquations());
         }
 
@@ -191,14 +208,24 @@ namespace GraphControl
         {
             return;
         }
+        bool keepCurrentView = true;
 
-        PlotGraph(true);
+        // If the equation has changed, the IsLineEnabled state is reset.
+        // This checks if the equation has been reset and sets keepCurrentView to false in this case.
+        if (!equation->HasGraphError && !equation->IsValidated && equation->IsLineEnabled)
+        {
+            keepCurrentView = false;
+        }
+
+        PlotGraph(keepCurrentView);
     }
 
     KeyGraphFeaturesInfo ^ Grapher::AnalyzeEquation(Equation ^ equation)
     {
         if (auto graph = GetGraph(equation))
         {
+            SetGraphArgs(graph);
+
             if (auto analyzer = graph->GetAnalyzer())
             {
                 vector<Equation ^> equationVector;
@@ -227,7 +254,7 @@ namespace GraphControl
 
     void Grapher::PlotGraph(bool keepCurrentView)
     {
-        TryPlotGraph(keepCurrentView, false);
+        TryPlotGraph(keepCurrentView,false);
     }
 
     task<void> Grapher::TryPlotGraph(bool keepCurrentView, bool shouldRetry)
@@ -246,12 +273,35 @@ namespace GraphControl
                 co_await TryUpdateGraph(keepCurrentView);
             }
         }
+
+        int valid = 0;
+        int invalid = 0;
+        for (Equation ^ eq : Equations)
+        {
+            if (eq->HasGraphError)
+            {
+                invalid++;
+            }
+            if (eq->IsValidated)
+            {
+                valid++;
+            }
+        }
+        if (!m_trigUnitsChanged)
+        {
+            TraceLogger::GetInstance()->LogEquationCountChanged(valid, invalid);
+        }
+
+        m_trigUnitsChanged = false;
+        GraphPlottedEvent(this, ref new RoutedEventArgs());
     }
 
     task<bool> Grapher::TryUpdateGraph(bool keepCurrentView)
     {
         optional<vector<shared_ptr<IEquation>>> initResult = nullopt;
         bool successful = false;
+        m_errorCode = 0;
+        m_errorType = 0;
 
         if (m_renderMain && m_graph != nullptr)
         {
@@ -277,12 +327,30 @@ namespace GraphControl
 
                     if (numValidEquations++ > 0)
                     {
-                        request += L"<mo>,</mo>";
+                        if (!UseCommaDecimalSeperator)
+                        {
+                            request += L"<mo>,</mo>";
+                        }
+                        else
+                        {
+                            request += L"<mo>;</mo>";
+                        }
                     }
                     auto equationRequest = eq->GetRequest()->Data();
 
                     // If the equation request failed, then fail graphing.
                     if (equationRequest == nullptr)
+                    {
+                        co_return false;
+                    }
+
+                    unique_ptr<IExpression> expr;
+                    wstring parsableEquation = s_getGraphOpeningTags;
+                    parsableEquation += equationRequest;
+                    parsableEquation += s_getGraphClosingTags;
+
+                    // Wire up the corresponding error to an error message in the UI at some point
+                    if (!(expr = m_solver->ParseInput(parsableEquation, m_errorCode, m_errorType)))
                     {
                         co_return false;
                     }
@@ -293,14 +361,21 @@ namespace GraphControl
                 request += s_getGraphClosingTags;
             }
 
-            if (graphExpression = m_solver->ParseInput(request))
+            if (graphExpression = m_solver->ParseInput(request, m_errorCode, m_errorType))
             {
                 initResult = TryInitializeGraph(keepCurrentView, graphExpression.get());
 
                 if (initResult != nullopt)
                 {
+                    auto graphedEquations = initResult.value();
+
+                    for (int i = 0; i < validEqs.size(); i++)
+                    {
+                        validEqs[i]->GraphedEquation = graphedEquations[i];
+                    }
+
                     UpdateGraphOptions(m_graph->GetOptions(), validEqs);
-                    SetGraphArgs();
+                    SetGraphArgs(m_graph);
 
                     m_renderMain->Graph = m_graph;
 
@@ -316,7 +391,12 @@ namespace GraphControl
                         // If we failed to render then we have already lost the previous graph
                         shouldKeepPreviousGraph = false;
                         initResult = nullopt;
+                        m_solver->HRErrorToErrorInfo(m_renderMain->GetRenderError(), m_errorCode, m_errorType);
                     }
+                }
+                else
+                {
+                    m_solver->HRErrorToErrorInfo(m_graph->GetInitializationError(), m_errorCode, m_errorType);
                 }
             }
 
@@ -325,11 +405,11 @@ namespace GraphControl
                 // Do not re-initialize the graph to empty if there are still valid equations graphed
                 if (!shouldKeepPreviousGraph)
                 {
-                    initResult = m_graph->TryInitialize();
+                    initResult = TryInitializeGraph(false, nullptr);
                     if (initResult != nullopt)
                     {
-                        UpdateGraphOptions(m_graph->GetOptions(), validEqs);
-                        SetGraphArgs();
+                        UpdateGraphOptions(m_graph->GetOptions(), vector<Equation ^>());
+                        SetGraphArgs(m_graph);
 
                         m_renderMain->Graph = m_graph;
                         co_await m_renderMain->RunRenderPassAsync();
@@ -361,20 +441,22 @@ namespace GraphControl
         {
             if (!eq->IsValidated)
             {
+                eq->GraphErrorType = static_cast<ErrorType>(m_errorType);
+                eq->GraphErrorCode = m_errorCode;
                 eq->HasGraphError = true;
             }
         }
     }
 
-    void Grapher::SetGraphArgs()
+    void Grapher::SetGraphArgs(shared_ptr<IGraph> graph)
     {
-        if (m_graph != nullptr && m_renderMain != nullptr)
+        if (graph != nullptr && m_renderMain != nullptr)
         {
             critical_section::scoped_lock lock(m_renderMain->GetCriticalSection());
 
-            for (auto variable : Variables)
+            for (auto variablePair : Variables)
             {
-                m_graph->SetArgValue(variable->Key->Data(), variable->Value);
+                graph->SetArgValue(variablePair->Key->Data(), variablePair->Value->Value);
             }
         }
     }
@@ -387,7 +469,7 @@ namespace GraphControl
         request += equation->GetRequest()->Data();
         request += s_getGraphClosingTags;
 
-        if (unique_ptr<IExpression> graphExpression = m_solver->ParseInput(request))
+        if (unique_ptr<IExpression> graphExpression = m_solver->ParseInput(request, m_errorCode, m_errorType))
         {
             if (graph->TryInitialize(graphExpression.get()))
             {
@@ -400,7 +482,7 @@ namespace GraphControl
 
     void Grapher::UpdateVariables()
     {
-        auto updatedVariables = ref new Map<String ^, double>();
+        auto updatedVariables = ref new Map<String ^, Variable ^>();
 
         if (m_graph)
         {
@@ -413,14 +495,26 @@ namespace GraphControl
                     auto key = ref new String(graphVar->GetVariableName().data());
                     double value = 1.0;
 
+                    Variable ^ variable;
+
                     if (Variables->HasKey(key))
                     {
-                        value = Variables->Lookup(key);
+                        variable = Variables->Lookup(key);
                     }
 
-                    updatedVariables->Insert(key, value);
+                    if (variable == nullptr)
+                    {
+                        variable = ref new Variable(1.0);
+                    }
+
+                    updatedVariables->Insert(key, variable);
                 }
             }
+        }
+
+        if (Variables->Size != updatedVariables->Size)
+        {
+            TraceLogger::GetInstance()->LogVariableCountChanged(updatedVariables->Size);
         }
 
         Variables = updatedVariables;
@@ -429,31 +523,22 @@ namespace GraphControl
 
     void Grapher::SetVariable(Platform::String ^ variableName, double newValue)
     {
-        if (Variables->HasKey(variableName))
+        if (!Variables->HasKey(variableName))
         {
-            if (Variables->Lookup(variableName) == newValue)
-            {
-                return;
-            }
-
-            Variables->Remove(variableName);
+            Variables->Insert(variableName, ref new Variable(newValue));
         }
-
-        Variables->Insert(variableName, newValue);
 
         if (m_graph != nullptr && m_renderMain != nullptr)
         {
-
-                auto workItemHandler = ref new WorkItemHandler([this, variableName, newValue](IAsyncAction ^ action) {
+            auto workItemHandler = ref new WorkItemHandler([this, variableName, newValue](IAsyncAction ^ action) {
                 m_renderMain->GetCriticalSection().lock();
                 m_graph->SetArgValue(variableName->Data(), newValue);
                 m_renderMain->GetCriticalSection().unlock();
 
-                m_renderMain->RunRenderPassAsync();
+                m_renderMain->RunRenderPass();
             });
 
             ThreadPool::RunAsync(workItemHandler, WorkItemPriority::High, WorkItemOptions::None);
-
         }
     }
 
@@ -474,6 +559,18 @@ namespace GraphControl
             {
                 auto lineColor = eq->LineColor;
                 graphColors.emplace_back(lineColor.R, lineColor.G, lineColor.B, lineColor.A);
+
+                if (eq->GraphedEquation)                
+                {
+                    if (!eq->HasGraphError && eq->IsSelected)
+                    {
+                        eq->GraphedEquation->TrySelectEquation();
+                    }
+
+                    eq->GraphedEquation->GetGraphEquationOptions()->SetLineStyle(static_cast<::Graphing::Renderer::LineStyle>(eq->EquationStyle));
+                    eq->GraphedEquation->GetGraphEquationOptions()->SetLineWidth(LineWidth);
+                    eq->GraphedEquation->GetGraphEquationOptions()->SetSelectedEquationLineWidth(LineWidth + ((LineWidth <= 2) ? 1 : 2));
+                }
             }
             options.SetGraphColors(graphColors);
         }
@@ -500,12 +597,25 @@ namespace GraphControl
         TryUpdateGraph(false);
     }
 
+    void Grapher::OnUseCommaDecimalSeperatorPropertyChanged(bool oldValue, bool newValue)
+    {
+        if (newValue)
+        {
+            m_solver->ParsingOptions().SetLocalizationType(::LocalizationType::DecimalCommaAndListSemicolon);
+            m_solver->FormatOptions().SetLocalizationType(::LocalizationType::DecimalCommaAndListSemicolon);
+        }
+        else
+        {
+            m_solver->ParsingOptions().SetLocalizationType(::LocalizationType::DecimalPointAndListComma);
+            m_solver->FormatOptions().SetLocalizationType(::LocalizationType::DecimalPointAndListComma);
+        }
+    }
+
     void Grapher::OnPointerEntered(PointerRoutedEventArgs ^ e)
     {
         if (m_renderMain)
         {
             OnPointerMoved(e);
-            m_renderMain->DrawNearestPoint = true;
 
             e->Handled = true;
         }
@@ -528,9 +638,34 @@ namespace GraphControl
     {
         if (m_renderMain)
         {
-            PointerPoint ^ currPoint = e->GetCurrentPoint(/* relativeTo */ this);
-            m_renderMain->PointerLocation = currPoint->Position;
-            UpdateTracingChanged();
+            m_renderMain->DrawNearestPoint = true;
+            Point currPosition = e->GetCurrentPoint(/* relativeTo */ this)->Position;
+
+            if (m_renderMain->ActiveTracing)
+            {
+                PointerValueChangedEvent(currPosition);
+                ActiveTraceCursorPosition = currPosition;
+
+                if (m_cachedCursor == nullptr)
+                {
+                    m_cachedCursor = ::CoreWindow::GetForCurrentThread()->PointerCursor;
+                    ::CoreWindow::GetForCurrentThread()->PointerCursor = nullptr;
+                }
+            }
+            else if (m_cachedCursor != nullptr)
+            {
+                m_renderMain->PointerLocation = currPosition;
+
+                ::CoreWindow::GetForCurrentThread()->PointerCursor = m_cachedCursor;
+                m_cachedCursor = nullptr;
+
+                UpdateTracingChanged();
+            }
+            else
+            {
+                m_renderMain->PointerLocation = currPosition;
+                UpdateTracingChanged();
+            }
 
             e->Handled = true;
         }
@@ -543,6 +678,12 @@ namespace GraphControl
             m_renderMain->DrawNearestPoint = false;
             TracingChangedEvent(false);
             e->Handled = true;
+        }
+
+        if (m_cachedCursor != nullptr)
+        {
+            ::CoreWindow::GetForCurrentThread()->PointerCursor = m_cachedCursor;
+            m_cachedCursor = nullptr;
         }
     }
 
@@ -570,6 +711,7 @@ namespace GraphControl
         const auto [centerX, centerY] = PointerPositionToGraphPosition(pos.X, pos.Y, ActualWidth, ActualHeight);
 
         ScaleRange(centerX, centerY, scale);
+        GraphViewChangedEvent(this, GraphViewChangedReason::Manipulation);
 
         e->Handled = true;
     }
@@ -614,11 +756,15 @@ namespace GraphControl
                     translationX /= -width;
                     translationY /= height;
 
+                    m_renderMain->GetCriticalSection().lock();
+
                     if (FAILED(renderer->MoveRangeByRatio(translationX, translationY)))
                     {
+                        m_renderMain->GetCriticalSection().unlock();
                         return;
                     }
 
+                    m_renderMain->GetCriticalSection().unlock();
                     needsRenderPass = true;
                 }
 
@@ -632,17 +778,22 @@ namespace GraphControl
                     const auto& pos = e->Position;
                     const auto [centerX, centerY] = PointerPositionToGraphPosition(pos.X, pos.Y, width, height);
 
+                    m_renderMain->GetCriticalSection().lock();
+
                     if (FAILED(renderer->ScaleRange(centerX, centerY, scale)))
                     {
+                        m_renderMain->GetCriticalSection().unlock();
                         return;
                     }
 
+                    m_renderMain->GetCriticalSection().unlock();
                     needsRenderPass = true;
                 }
 
                 if (needsRenderPass)
                 {
                     m_renderMain->RunRenderPass();
+                    GraphViewChangedEvent(this, GraphViewChangedReason::Manipulation);
                 }
             }
         }
@@ -868,7 +1019,7 @@ String ^ Grapher::ConvertToLinear(String ^ mmlString)
 {
     m_solver->FormatOptions().SetFormatType(FormatType::LinearInput);
 
-    auto expression = m_solver->ParseInput(mmlString->Data());
+    auto expression = m_solver->ParseInput(mmlString->Data(), m_errorCode, m_errorType);
     auto linearExpression = m_solver->Serialize(expression.get());
 
     m_solver->FormatOptions().SetFormatType(s_defaultFormatType);
@@ -878,7 +1029,7 @@ String ^ Grapher::ConvertToLinear(String ^ mmlString)
 
 String ^ Grapher::FormatMathML(String ^ mmlString)
 {
-    auto expression = m_solver->ParseInput(mmlString->Data());
+    auto expression = m_solver->ParseInput(mmlString->Data(), m_errorCode, m_errorType);
     auto formattedExpression = m_solver->Serialize(expression.get());
     return ref new String(formattedExpression.c_str());
 }
@@ -907,14 +1058,41 @@ void Grapher::OnGraphBackgroundPropertyChanged(Windows::UI::Color /*oldValue*/, 
     }
 }
 
+
+void Grapher::OnGridLinesColorPropertyChanged(Windows::UI::Color /*oldValue*/, Windows::UI::Color newValue)
+{
+    if (m_renderMain != nullptr && m_graph != nullptr)
+    {
+        auto gridLinesColor = Graphing::Color(newValue.R, newValue.G, newValue.B, newValue.A);
+        m_graph->GetOptions().SetGridColor(gridLinesColor);
+        m_renderMain->RunRenderPassAsync();
+    }
+}
+
+void Grapher::OnLineWidthPropertyChanged(double oldValue, double newValue)
+{
+    if (m_graph)
+    {
+        UpdateGraphOptions(m_graph->GetOptions(), GetGraphableEquations());
+        if (m_renderMain)
+        {
+            m_renderMain->SetPointRadius(LineWidth + 1);
+            m_renderMain->RunRenderPass();
+
+             TraceLogger::GetInstance()->LogLineWidthChanged();
+        }
+    }
+}
+
 optional<vector<shared_ptr<Graphing::IEquation>>> Grapher::TryInitializeGraph(bool keepCurrentView, const IExpression* graphingExp)
 {
-    if (keepCurrentView)
+    if (keepCurrentView || IsKeepCurrentView)
     {
         double xMin, xMax, yMin, yMax;
         m_graph->GetRenderer()->GetDisplayRanges(xMin, xMax, yMin, yMax);
         auto initResult = m_graph->TryInitialize(graphingExp);
         m_graph->GetRenderer()->SetDisplayRanges(xMin, xMax, yMin, yMax);
+
         return initResult;
     }
     else

@@ -24,6 +24,9 @@ namespace CalculatorApp::Common::Automation
         StringReference OpenParenthesisCountChanged(L"OpenParenthesisCountChanged");
         StringReference NoParenthesisAdded(L"NoParenthesisAdded");
         StringReference GraphModeChanged(L"GraphModeChanged");
+        StringReference GraphViewChanged(L"GraphViewChanged");
+        StringReference FunctionRemoved(L"FunctionRemoved");
+        StringReference GraphViewBestFitChanged(L"GraphViewBestFitChanged");
     }
 }
 
@@ -142,11 +145,38 @@ NarratorAnnouncement ^ CalculatorAnnouncement::GetNoRightParenthesisAddedAnnounc
         AutomationNotificationProcessing::ImportantMostRecent);
 }
 
-NarratorAnnouncement ^ CalculatorAnnouncement::GetGraphModeChangedAnnouncement(Platform::String ^ announcement)
+NarratorAnnouncement ^ CalculatorAnnouncement::GetGraphModeChangedAnnouncement(String ^ announcement)
 {
     return ref new NarratorAnnouncement(
         announcement,
         CalculatorActivityIds::GraphModeChanged,
         AutomationNotificationKind::ActionCompleted,
         AutomationNotificationProcessing::ImportantMostRecent);
+}
+
+NarratorAnnouncement ^ CalculatorAnnouncement::GetGraphViewChangedAnnouncement(String ^ announcement)
+{
+    return ref new NarratorAnnouncement(
+        announcement,
+        CalculatorActivityIds::GraphViewChanged,
+        AutomationNotificationKind::ActionCompleted,
+        AutomationNotificationProcessing::MostRecent);
+}
+
+NarratorAnnouncement ^ CalculatorAnnouncement::GetFunctionRemovedAnnouncement(String ^ announcement)
+{
+    return ref new NarratorAnnouncement(
+        announcement,
+        CalculatorActivityIds::FunctionRemoved,
+        AutomationNotificationKind::ItemRemoved,
+        AutomationNotificationProcessing::MostRecent);
+}
+
+NarratorAnnouncement ^ CalculatorAnnouncement::GetGraphViewBestFitChangedAnnouncement(Platform::String ^ announcement)
+{
+    return ref new NarratorAnnouncement(
+        announcement,
+        CalculatorActivityIds::GraphViewBestFitChanged,
+        AutomationNotificationKind::ActionCompleted,
+        AutomationNotificationProcessing::MostRecent);
 }

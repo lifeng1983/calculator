@@ -9,6 +9,7 @@
 #include "Views\GraphingCalculator\KeyGraphFeaturesPanel.xaml.h"
 #include "Views\GraphingCalculator\GraphingNumPad.xaml.h"
 #include "Views\GraphingCalculator\GraphingSettings.xaml.h"
+#include "CalcViewModel\Common\TraceLogger.h"
 
 namespace CalculatorApp
 {
@@ -24,9 +25,11 @@ public ref class GraphingCalculator sealed : public Windows::UI::Xaml::Data::INo
         DEPENDENCY_PROPERTY_OWNER(GraphingCalculator);
         COMMAND_FOR_METHOD(ZoomOutButtonPressed, GraphingCalculator::OnZoomOutCommand);
         COMMAND_FOR_METHOD(ZoomInButtonPressed, GraphingCalculator::OnZoomInCommand);
-        COMMAND_FOR_METHOD(ZoomResetButtonPressed, GraphingCalculator::OnZoomResetCommand);
         OBSERVABLE_PROPERTY_R(bool, IsKeyGraphFeaturesVisible);
         DEPENDENCY_PROPERTY(bool, IsSmallState);
+        DEPENDENCY_PROPERTY(Platform::String ^, GraphControlAutomationName);
+        OBSERVABLE_PROPERTY_R(bool, IsMatchAppTheme);
+        OBSERVABLE_PROPERTY_RW(bool, IsManualAdjustment);
 
         property CalculatorApp::ViewModel::GraphingCalculatorViewModel^ ViewModel
         {
@@ -50,7 +53,6 @@ public ref class GraphingCalculator sealed : public Windows::UI::Xaml::Data::INo
 
         void OnZoomInCommand(Object ^ parameter);
         void OnZoomOutCommand(Object ^ parameter);
-        void OnZoomResetCommand(Object ^ parameter);
 
         void OnShareClick(Platform::Object ^ sender, Windows::UI::Xaml::RoutedEventArgs ^ e);
 
@@ -65,6 +67,8 @@ public ref class GraphingCalculator sealed : public Windows::UI::Xaml::Data::INo
         void GraphingControl_LostFocus(Platform::Object ^ sender, Windows::UI::Xaml::RoutedEventArgs ^ e);
         void GraphingControl_LosingFocus(Windows::UI::Xaml::UIElement ^ sender, Windows::UI::Xaml::Input::LosingFocusEventArgs ^ args);
         void GraphingControl_VariablesUpdated(Platform::Object ^ sender, Object ^ args);
+        void GraphingControl_GraphViewChangedEvent(Platform::Object ^ sender, GraphControl::GraphViewChangedReason reason);
+        void GraphingControl_GraphPlottedEvent(Platform::Object ^ sender, Windows::UI::Xaml::RoutedEventArgs ^ e);
         void OnEquationKeyGraphFeaturesRequested(Platform::Object ^ sender, CalculatorApp::ViewModel::EquationViewModel ^ e);
         void OnKeyGraphFeaturesClosed(Platform::Object ^ sender, Windows::UI::Xaml::RoutedEventArgs ^ e);
         void TraceValuePopup_SizeChanged(Platform::Object ^ sender, Windows::UI::Xaml::SizeChangedEventArgs ^ e);
@@ -78,6 +82,11 @@ public ref class GraphingCalculator sealed : public Windows::UI::Xaml::Data::INo
         void DisplayGraphSettings();
         void AddTracePointerShadow();
 
+        void UpdateGraphAutomationName();
+        void OnColorValuesChanged(Windows::UI::ViewManagement::UISettings ^ sender, Platform::Object ^ args);
+        void UpdateGraphTheme();
+        void OnGraphThemeSettingChanged(Platform::Object ^ sender, bool isMatchAppTheme);
+
     private:
         Windows::Foundation::EventRegistrationToken m_dataRequestedToken;
         Windows::Foundation::EventRegistrationToken m_vectorChangedToken;
@@ -86,11 +95,17 @@ public ref class GraphingCalculator sealed : public Windows::UI::Xaml::Data::INo
         Windows::Foundation::EventRegistrationToken m_ActiveTracingPointerCaptureLost;
         CalculatorApp::ViewModel::GraphingCalculatorViewModel ^ m_viewModel;
         Windows::UI::ViewManagement::AccessibilitySettings ^ m_accessibilitySettings;
-        void
-            OnSettingsFlyout_Closing(Windows::UI::Xaml::Controls::Primitives::FlyoutBase ^ sender, Windows::UI::Xaml::Controls::Primitives::FlyoutBaseClosingEventArgs ^ args);
-        void LeftGrid_SizeChanged(Platform::Object ^ sender, Windows::UI::Xaml::SizeChangedEventArgs ^ e);
+        bool m_cursorShadowInitialized;
+        Windows::UI::ViewManagement::UISettings ^ m_uiSettings;
+        Windows::UI::Xaml::Controls::Flyout ^ m_graphFlyout;
+        CalculatorApp::GraphingSettings ^ m_graphSettings;
+        void Canvas_SizeChanged(Platform::Object ^ sender, Windows::UI::Xaml::SizeChangedEventArgs ^ e);
         void OnHighContrastChanged(Windows::UI::ViewManagement::AccessibilitySettings ^ sender, Platform::Object ^ args);
         void OnEquationFormatRequested(Platform::Object ^ sender, CalculatorApp::Controls::MathRichEditBoxFormatRequest ^ e);
+        void GraphMenuFlyoutItem_Click(Platform::Object ^ sender, Windows::UI::Xaml::RoutedEventArgs ^ e);
+        void OnVisualStateChanged(Platform::Object ^ sender, Windows::UI::Xaml::VisualStateChangedEventArgs ^ e);
+        std::wstringstream FormatTraceValue(double min, double max, float pointValue);
+        void GraphViewButton_Click(Platform::Object ^ sender, Windows::UI::Xaml::RoutedEventArgs ^ e);
     };
 
 }
